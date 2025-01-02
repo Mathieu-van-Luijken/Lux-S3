@@ -6,7 +6,7 @@ from typing import Any, Tuple
 from ...src.luxai_s3.env import LuxAIS3Env
 
 def main():
-    pass
+    env = LuxAIS3Env()
 
 if __name__ == '__main__':
     main()
