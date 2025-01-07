@@ -9,68 +9,42 @@ from typing import Any, Tuple
 
 
 class PPOAgent(nn.Module):
-    def __init__(self, player: str) -> None:
-        self.player = player
-        self.opp_player = "player_1" if self.player == "player_0" else "player_0"
-        self.team_id = 0 if self.player == "player_0" else 1
-        self.opp_team_id = 1 if self.team_id == 0 else 0
-        np.random.seed(0)
-        # self.env_cfg = env_cfg
 
-        self.relic_node_positions = []
-        self.discovered_relic_nodes_ids = set()
-        self.unit_explore_locations = dict()
+    @nn.compact
+    def cnn_embedder(self, board_state_tensor):
+        """Embeds the board state tensor into a 128-dimensional space."""
+        x = board_state_tensor.transpose(0, 2, 3, 1)  # Add channel dimension
+        x = nn.Conv(features=16, kernel_size=(3, 3), padding="SAME")(x)
+        x = nn.relu(x)
+        x = nn.max_pool(x, window_shape=(2, 2), strides=(2, 2), padding="VALID")
+        x = nn.Conv(features=32, kernel_size=(3, 3), padding="SAME")(x)
+        x = nn.relu(x)
+        x = nn.max_pool(x, window_shape=(2, 2), strides=(2, 2), padding="VALID")
+        x = x.reshape((x.shape[0], -1))  # Flatten
+        x = nn.Dense(features=128)(x)
+        embedding = nn.relu(x)
+        return embedding
 
-    def create_board_tensor(self, obs):
-        obs = obs[self.player]
-        # Create unit board
-        unit_board = np.zeros((24, 24), dtype=int)
-        for unit_pos in np.array(obs["units"]["position"][self.team_id]):
-            if unit_pos[0] >= 0:
-                unit_board[unit_pos[0], unit_pos[1]] += 1
+    @nn.compact
+    def critic(self, embedding):
+        """Computes the value estimation."""
+        x = nn.Dense(features=64)(embedding)
+        x = nn.relu(x)
+        value = nn.Dense(features=1)(x)
+        return value
 
-        # Create relic board
-        relic_board = np.zeros((24, 24), dtype=int)
-        for relic_pos in np.array(obs["relic_nodes"]):
-            if relic_pos[0] >= 0:
-                relic_board[relic_pos[0], relic_pos[1]] += 1
+    @nn.compact
+    def actor(self, embedding):
+        """Computes the action logits."""
+        x = nn.Dense(features=64)(embedding)
+        x = nn.relu(x)
+        logits = nn.Dense(features=6)(x)
+        return logits
 
-        # Obtain tile information
-        tile_board = jnp.array(obs["map_features"]["tile_type"])
-
-        # Create tile boards board
-        vision_board = jnp.where(tile_board == -1, 0, 1)
-        normal_tiles = jnp.where(tile_board == 0, 1, 0)
-        nebula_tiles = jnp.where(tile_board == 1, 1, 0)
-        asteroid_tiles = jnp.where(tile_board == 2, 1, 0)
-
-        # Obtain energy tiles
-        energy_tiles = obs["map_features"]["energy"]
-
-        # Energy
-        energy = jnp.array(obs["units"]["energy"] / 100)[0][:, None]  # NOTE fix the 0
-        unit_positions = np.array(obs["units"]["position"])[0]
-        unit_energy = jnp.concat([energy, unit_positions], axis=-1)
-        unit_energy_board = np.zeros((24, 24), dtype=int)
-        for energy_pos in np.array(unit_energy):
-            if energy_pos[0] >= 0:
-                unit_energy_board[energy[0], energy_pos[1]] += energy_pos[2]
-
-        # Stack all boards
-        board_state_tensor = jnp.stack(
-            [
-                unit_board,
-                unit_energy_board,
-                relic_board,
-                vision_board,
-                normal_tiles,
-                nebula_tiles,
-                asteroid_tiles,
-                energy_tiles,
-            ]
-        )
-
-        return board_state_tensor
-
-    def act(self, step: int, obs, remainingOvergaeTime: int = 60):
-        board_state_tensor = self.create_board_tensor(obs)
+    @nn.compact
+    def __call__(self, board_state_tensor):
+        """Forward pass of the PPO agent."""
+        embedding = self.cnn_embedder(board_state_tensor)
+        value = self.critic(embedding)
+        logits = self.actor(embedding)
+        return value, logits
