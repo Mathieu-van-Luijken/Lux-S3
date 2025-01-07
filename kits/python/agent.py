@@ -4,22 +4,31 @@ import numpy as np
 from ppo_agent import PPOAgent
 import jax.numpy as jnp
 import jax
+import flax.serialization
 
 
 class Agent:
-    def __init__(self, player: str) -> None:
+    def __init__(
+        self, player: str, load_parameters: bool = False, filename: str = None
+    ) -> None:
         self.player = player
         self.opp_player = "player_1" if self.player == "player_0" else "player_0"
         self.team_id = 0 if self.player == "player_0" else 1
         self.opp_team_id = 1 if self.team_id == 0 else 0
         np.random.seed(0)
+
         # self.env_cfg = env_cfg
 
         # Initialize the gameplay agent
         self.ppo_agent = PPOAgent()
         self.rng = jax.random.PRNGKey(2504)
         x = jax.random.normal(self.rng, (1, 8, 24, 24))
-        self.variables = self.ppo_agent.init(self.rng, x)
+        self.params = self.ppo_agent.init(self.rng, x)
+
+        # Load parameters
+        if load_parameters:
+            with open(filename, "rb") as f:
+                self.params = flax.serialization.from_bytes(self.params, f.read())
 
     def preproces(
         self,
@@ -97,6 +106,6 @@ class Agent:
 
         actions = []
         for unit in range(unit_positions):
-            logits, value = self.ppo_agent.apply(self.variables, board_state_tensor)
+            logits, value = self.ppo_agent.apply(self.params, board_state_tensor)
 
         return actions
