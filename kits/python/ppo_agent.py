@@ -38,8 +38,10 @@ class PPOAgent(nn.Module):
         """Computes the action logits."""
         x = nn.Dense(features=64)(embedding)
         x = nn.relu(x)
-        logits = nn.Dense(features=6)(x)
-        return logits
+        action_logits = nn.Dense(features=6)(x)
+        x_coord = nn.Dense(features=24)(x)
+        y_coord = nn.Dense(features=24)(x)
+        return action_logits, x_coord, y_coord
 
     @nn.compact
     def __call__(self, board_state_tensor):
