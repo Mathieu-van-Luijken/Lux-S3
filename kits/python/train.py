@@ -19,7 +19,11 @@ def main(env, agent):
     obs, info = env.reset()
     done = False
     actions = {}
-    value, logits = agent.act(step=0, obs=obs["player_0"])
+    player_actions = agent.act(step=0, obs=obs["player_0"])
+    actions["player_0"] = player_actions
+    actions["player_1"] = player_actions
+    obs, rewards, terminations, truncations, info = env.step(actions)
+    player_actions = agent.act(step=1, obs=obs["player_0"])
 
 
 if __name__ == "__main__":

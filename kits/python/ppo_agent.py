@@ -48,5 +48,5 @@ class PPOAgent(nn.Module):
         """Forward pass of the PPO agent."""
         embedding = self.cnn_embedder(board_state_tensor)
         value = self.critic(embedding)
-        logits = self.actor(embedding)
-        return value, logits
+        logits, x_coord, y_coord = self.actor(embedding)
+        return value, logits, x_coord, y_coord
