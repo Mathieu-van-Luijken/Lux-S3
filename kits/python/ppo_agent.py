@@ -11,7 +11,7 @@ from typing import Any, Tuple
 class PPOAgent(nn.Module):
 
     @nn.compact
-    def cnn_embedder(self, board_state_tensor):
+    def cnn_embedder(self, board_state_tensor, unit_info):
         """Embeds the board state tensor into a 128-dimensional space."""
         x = board_state_tensor.transpose(0, 2, 3, 1)  # Add channel dimension
         x = nn.Conv(features=16, kernel_size=(3, 3), padding="SAME")(x)
@@ -22,7 +22,8 @@ class PPOAgent(nn.Module):
         x = nn.max_pool(x, window_shape=(2, 2), strides=(2, 2), padding="VALID")
         x = x.reshape((x.shape[0], -1))  # Flatten
         x = nn.Dense(features=128)(x)
-        embedding = nn.relu(x)
+        board_embedding = nn.relu(x)
+        embedding = jnp.concat([board_embedding, unit_info], axis=-1)
         return embedding
 
     @nn.compact
@@ -39,14 +40,14 @@ class PPOAgent(nn.Module):
         x = nn.Dense(features=64)(embedding)
         x = nn.relu(x)
         action_logits = nn.Dense(features=6)(x)
-        x_coord = nn.Dense(features=24)(x)
-        y_coord = nn.Dense(features=24)(x)
+        x_coord = nn.Dense(features=4)(x)
+        y_coord = nn.Dense(features=4)(x)
         return action_logits, x_coord, y_coord
 
     @nn.compact
-    def __call__(self, board_state_tensor):
+    def __call__(self, board_state_tensor, unit_info):
         """Forward pass of the PPO agent."""
-        embedding = self.cnn_embedder(board_state_tensor)
+        embedding = self.cnn_embedder(board_state_tensor, unit_info=unit_info)
         value = self.critic(embedding)
-        logits, x_coord, y_coord = self.actor(embedding)
-        return value, logits, x_coord, y_coord
+        action_logits, x_coord_logits, y_coord_logits = self.actor(embedding)
+        return value, action_logits, x_coord_logits, y_coord_logits
