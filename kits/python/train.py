@@ -4,6 +4,7 @@ from jax import random, grad, value_and_grad
 import optax
 import numpy as np
 from typing import Any, Tuple
+from dataclasses import dataclass
 
 from ppo_agent import PPOAgent
 
@@ -16,8 +17,15 @@ from src.luxai_s3.wrappers import LuxAIS3GymEnv
 from src.luxai_runner.utils import to_json
 
 
-def sample_action(key, move_probs):
+@dataclass
+class Trajectory:
+    osbservations: list
+    actions: list
+    log_probs: list
+    rewards: list
 
+
+def sample_action(key, move_probs):
     key, subkey = jax.random.split(key)
     move_action = jax.random.choice(
         subkey, move_probs.shape[-1], p=move_probs.flatten()
@@ -57,12 +65,13 @@ def main(env, agent: PPOAgent, params, key):
     optimizer = optax.adam(learning_rate=3e-4)
     opt_state = optimizer.init(params=params)
 
-    for episode in range(505):
+    for episode in range(num_episodes):
         obs, info = env.reset()
         done = False
+        episode_reward = 0
+        trajectory = Trajectory([], [], [], [])
 
         while not done:
-            action1, actions2, log_probs1, log_probs2 = [], [], [], []
             actions_dict = {}
             for player in [0, 1]:
                 #     if player == 0:
@@ -75,35 +84,54 @@ def main(env, agent: PPOAgent, params, key):
                 #         player_2_actions = jnp.stack([action_state] * 16, axis=0)
                 # final_action = {"player_0": player_1_actions, "player_1": player_2_actions}
                 # obs = env.step(final_action)
-                actions = []
-                log_prob = []
                 if isinstance(obs, tuple):
                     obs = obs[0]
-                (
-                    unit_positions,
-                    unit_energies,
-                    relic_positions,
-                    tile_board,
-                    energy_board,
-                ) = agent.get_relevant_info(obs[f"player_{player}"])
-                for i, unit in enumerate(unit_positions[player]):
-                    if jnp.any(unit[1] >= 0):
-                        unit_info = jnp.append(unit, unit_energies[player][i])[None, :]
-                        value, move_probs = agent.apply(
-                            params,
-                            unit_positions,
-                            unit_energies,
-                            relic_positions,
-                            tile_board,
-                            energy_board,
-                            unit_info,
-                        )
-                        action = sample_action(key=key, move_probs=move_probs)
-                        actions.append(action)
-                    else:
-                        actions.append([0, 0, 0])
+                traj_actions = []
+                traj_log_probs = []
+                if player == 0:
+                    traj_obs = obs
+
+                    (
+                        unit_positions,
+                        unit_energies,
+                        relic_positions,
+                        tile_board,
+                        energy_board,
+                    ) = agent.get_relevant_info(obs[f"player_{player}"])
+                    for i, unit in enumerate(unit_positions[player]):
+                        if jnp.any(unit[1] >= 0):
+                            unit_info = jnp.append(unit, unit_energies[player][i])[
+                                None, :
+                            ]
+                            value, move_probs = agent.apply(
+                                params,
+                                unit_positions,
+                                unit_energies,
+                                relic_positions,
+                                tile_board,
+                                energy_board,
+                                unit_info,
+                            )
+                            action = sample_action(key=key, move_probs=move_probs)
+                            actions.append(action)
+                        else:
+                            actions.append([0, 0, 0])
+
+                else:
+                    action = [0, 0, 0]
+                    actions = [action * 16]
+
                 actions_dict[f"player_{player}"] = jnp.vstack(actions)
-            obs = env.step(actions_dict)
+
+            obs, state, reward, _, _, _ = env.step(actions_dict)
+            calculate_reward(obs)
+            episode_reward += calculate_reward(obs)
+
+            # Log all values
+            trajectory["observations"].append(obs)
+            trajectory["actions"].append(actions_dict)
+            trajectory["log_probs"].append(log_prob)
+            trajectory["rewards"].append(reward)
 
 
 if __name__ == "__main__":
