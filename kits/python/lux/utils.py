@@ -7,11 +7,11 @@ def direction_to(src, target):
         return 0
     if abs(dx) > abs(dy):
         if dx > 0:
-            return 2 
+            return 2 #right
         else:
-            return 4
+            return 4 #left
     else:
         if dy > 0:
-            return 3
+            return 3 # up
         else:
-            return 1
+            return 1 # down
