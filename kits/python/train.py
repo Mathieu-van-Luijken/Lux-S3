@@ -1,20 +1,21 @@
-import jax
-import jax.numpy as jnp
-from jax import random, grad, value_and_grad
-import optax
-import numpy as np
+import os
+import sys
 from typing import Any, Tuple
 from dataclasses import dataclass
 
+import jax
+import jax.numpy as jnp
+import numpy as np
+import optax
+from jax import grad, random, value_and_grad
 from ppo_agent import PPOAgent
 
-import sys
-import os
+sys.path.append(os.path.dirname(os.path.abspath(__file__)) + "/../../src")
+from reward import calculate_reward
 
-sys.path.append(os.path.dirname(os.path.abspath(__file__)) + "/../..")
-from src.luxai_s3.env import LuxAIS3Env
-from src.luxai_s3.wrappers import LuxAIS3GymEnv
-from src.luxai_runner.utils import to_json
+from luxai_runner.utils import to_json
+from luxai_s3.env import LuxAIS3Env
+from luxai_s3.wrappers import LuxAIS3GymEnv
 
 
 @dataclass
