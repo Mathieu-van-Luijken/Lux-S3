@@ -21,7 +21,7 @@ class PPOAgent(nn.Module):
     ):
 
         # Create unit board
-        unit_board = jnp.zeros((24, 24), dtype=jnp.int16)
+        unit_board = jnp.zeros((24, 24), dtype=jnp.float32)
 
         # Obtain all coords of existing friendly units
         friendly_units = unit_positions[0]
@@ -40,7 +40,7 @@ class PPOAgent(nn.Module):
         unit_board = unit_board.at[enemy_coords[:, 0], enemy_coords[:, 1]].set(-1)
 
         # Create the energy board for units
-        unit_energy_board = jnp.zeros((24, 24), dtype=jnp.int16)
+        unit_energy_board = jnp.zeros((24, 24), dtype=jnp.float32)
 
         # Set all friendly energies
         friendly_energies = unit_energies[0][friendly_valid].flatten()
@@ -55,7 +55,7 @@ class PPOAgent(nn.Module):
         ].add(enemy_energies)
 
         # Create relic board
-        relic_board = jnp.zeros((24, 24), dtype=jnp.int16)
+        relic_board = jnp.zeros((24, 24), dtype=jnp.float32)
         found_relic = relic_positions[:, 0] >= 0
         found_relic_pos = relic_positions[found_relic]
         relic_x_coords, relic_y_coords = found_relic_pos[:, 0], found_relic_pos[:, 1]
@@ -65,7 +65,7 @@ class PPOAgent(nn.Module):
         vision_board = jnp.where(tile_board == -1, 0, 1)
 
         # Use onehot encoding to find locations of other tiles
-        tile_types = jax.nn.one_hot(tile_board, num_classes=4, dtype=jnp.int16)
+        tile_types = jax.nn.one_hot(tile_board, num_classes=4, dtype=jnp.float32)
         normal_tiles = tile_types[..., 0]
         nebula_tiles = tile_types[..., 1]
         asteroid_tiles = tile_types[..., 2]
