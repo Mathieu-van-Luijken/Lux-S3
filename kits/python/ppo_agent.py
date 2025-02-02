@@ -6,9 +6,104 @@ from flax.training import train_state
 import optax
 import numpy as np
 from typing import Any, Tuple
+from functools import partial
 
 
 class PPOAgent(nn.Module):
+
+    def preproces(
+        self,
+        unit_positions,
+        unit_energies,
+        relic_positions,
+        tile_board,
+        energy_board,
+        team_id,
+    ):
+
+        # Create unit board
+        unit_board = jnp.zeros((24, 24), dtype=jnp.int16)
+
+        # Obtain all coords of existing friendly units
+        friendly_units = unit_positions[0]
+        friendly_valid = jnp.logical_not(jnp.all(friendly_units == -1, axis=-1))
+        friendly_coords = friendly_units[friendly_valid]
+
+        # Obtain all coords of existing enemy units
+        enemy_units = unit_positions[1]
+        enemy_valid = jnp.logical_not(jnp.all(enemy_units == -1, axis=-1))
+        enemy_coords = enemy_units[enemy_valid]
+
+        # Set all positions on the board
+        unit_board = unit_board.at[friendly_coords[:, 0], friendly_coords[:, 1]].set(1)
+        unit_board = unit_board.at[enemy_coords[:, 0], enemy_coords[:, 1]].set(-1)
+
+        # Create the energy board for units
+        unit_energy_board = jnp.zeros((24, 24), dtype=jnp.int16)
+
+        # Set all friendly energies
+        friendly_energies = unit_energies[0][friendly_valid].flatten()
+        unit_energy_board = unit_energy_board.at[
+            friendly_coords[:, 0], friendly_coords[:, 1]
+        ].add(friendly_energies)
+
+        # Set all enemy energies
+        enemy_energies = unit_energies[0][enemy_valid].flatten()
+        unit_energy_board = unit_energy_board.at[
+            enemy_coords[:, 0], enemy_coords[:, 1]
+        ].add(enemy_energies)
+
+        # Create relic board
+        relic_board = jnp.zeros((24, 24), dtype=jnp.int16)
+        found_relic = relic_positions[:, 0] >= 0
+        found_relic_pos = relic_positions[found_relic]
+        relic_x_coords, relic_y_coords = found_relic_pos[:, 0], found_relic_pos[:, 1]
+        relic_board = relic_board.at[relic_x_coords, relic_y_coords].add(1)
+
+        # Obtain the vision board
+        vision_board = jnp.where(tile_board == -1, 0, 1)
+
+        # Use onehot encoding to find locations of other tiles
+        tile_types = jax.nn.one_hot(tile_board, num_classes=4, dtype=jnp.int16)
+        normal_tiles = tile_types[..., 0]
+        nebula_tiles = tile_types[..., 1]
+        asteroid_tiles = tile_types[..., 2]
+
+        # Stack all boards
+        board_state_tensor = jnp.stack(
+            [
+                unit_board,
+                unit_energy_board,
+                relic_board,
+                vision_board,
+                normal_tiles,
+                nebula_tiles,
+                asteroid_tiles,
+                energy_board,
+            ],
+        )
+        return board_state_tensor[None, ...]
+
+    @partial(jax.jit, static_argnums=(1,))
+    def get_relevant_info(self, obs):
+        # Concatenate unit and energy per unit info
+        unit_positions = jnp.array(obs["units"]["position"])
+        unit_energies = jnp.array(obs["units"]["energy"]) / 100
+
+        # Obtain Relic positions
+        relic_positions = jnp.array(obs["relic_nodes"])
+
+        # Get the board energies
+        tile_board = jnp.array(obs["map_features"]["tile_type"])
+        energy_board = jnp.array(obs["map_features"]["energy"])
+
+        return (
+            unit_positions,
+            unit_energies,
+            relic_positions,
+            tile_board,
+            energy_board,
+        )
 
     @nn.compact
     def cnn_embedder(self, board_state_tensor, unit_info):
@@ -42,11 +137,22 @@ class PPOAgent(nn.Module):
         action_logits = nn.Dense(features=6)(x)
         x_coord = nn.Dense(features=4)(x)
         y_coord = nn.Dense(features=4)(x)
-        return action_logits, x_coord, y_coord
+        return nn.softmax(action_logits), nn.softmax(x_coord), nn.softmax(y_coord)
 
     @nn.compact
-    def __call__(self, board_state_tensor, unit_info):
+    def __call__(
+        self,
+        unit_positions,
+        unit_energies,
+        relic_positions,
+        tile_board,
+        energy_board,
+        unit_info,
+    ):
         """Forward pass of the PPO agent."""
+        board_state_tensor = self.preproces(
+            unit_positions, unit_energies, relic_positions, tile_board, energy_board
+        )
         embedding = self.cnn_embedder(board_state_tensor, unit_info=unit_info)
         value = self.critic(embedding)
         action_logits, x_coord_logits, y_coord_logits = self.actor(embedding)
