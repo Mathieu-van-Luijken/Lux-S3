@@ -16,21 +16,18 @@ from src.luxai_s3.wrappers import LuxAIS3GymEnv
 from src.luxai_runner.utils import to_json
 
 
-def sample_action(key, move_probs, x_probs, y_probs):
+def sample_action(key, move_probs):
 
     key, subkey = jax.random.split(key)
     move_action = jax.random.choice(
         subkey, move_probs.shape[-1], p=move_probs.flatten()
     )
 
-    x_action = 0
-    y_action = 0
-
     if move_action == 5:
         key, subkey_x, subkey_y = jax.random.split(key, 3)
-        x_action = jax.random.choice(subkey_x, x_probs.shape[-1], p=x_probs.flatten())
-        y_action = jax.random.choice(subkey_y, y_probs.shape[-1], p=y_probs.flatten())
-    return jnp.array([move_action, x_action, y_action])
+        move_action = 0
+
+    return jnp.array([move_action, 0, 0])
 
 
 def init_agent(key):
@@ -54,26 +51,63 @@ def init_agent(key):
     return ppo_agent, params
 
 
-def main(env, agent, params):
+def main(env, agent: PPOAgent, params, key):
     num_episodes = 1000
     batch_size = 64
     optimizer = optax.adam(learning_rate=3e-4)
     opt_state = optimizer.init(params=params)
 
-    for episode in range(1000):
+    for episode in range(505):
         obs, info = env.reset()
         done = False
 
         while not done:
             action1, actions2, log_probs1, log_probs2 = [], [], [], []
-
+            actions_dict = {}
             for player in [0, 1]:
-                
-                
+                #     if player == 0:
+                #         action = np.random.choice([2, 3])
+                #         action_state = np.array([action, 0, 0])
+                #         player_1_actions = jnp.stack([action_state] * 16, axis=0)
+                #     if player == 1:
+                #         action = np.random.choice([1, 4])
+                #         action_state = np.array([action, 0, 0])
+                #         player_2_actions = jnp.stack([action_state] * 16, axis=0)
+                # final_action = {"player_0": player_1_actions, "player_1": player_2_actions}
+                # obs = env.step(final_action)
+                actions = []
+                log_prob = []
+                if isinstance(obs, tuple):
+                    obs = obs[0]
+                (
+                    unit_positions,
+                    unit_energies,
+                    relic_positions,
+                    tile_board,
+                    energy_board,
+                ) = agent.get_relevant_info(obs[f"player_{player}"])
+                for i, unit in enumerate(unit_positions[player]):
+                    if jnp.any(unit[1] >= 0):
+                        unit_info = jnp.append(unit, unit_energies[player][i])[None, :]
+                        value, move_probs = agent.apply(
+                            params,
+                            unit_positions,
+                            unit_energies,
+                            relic_positions,
+                            tile_board,
+                            energy_board,
+                            unit_info,
+                        )
+                        action = sample_action(key=key, move_probs=move_probs)
+                        actions.append(action)
+                    else:
+                        actions.append([0, 0, 0])
+                actions_dict[f"player_{player}"] = jnp.vstack(actions)
+            obs = env.step(actions_dict)
 
 
 if __name__ == "__main__":
     env = LuxAIS3GymEnv(numpy_output=True)
     key = jax.random.PRNGKey(2504)
     agent, params = init_agent(key=key)
-    main(env, agent, params)
+    main(env, agent, params, key)

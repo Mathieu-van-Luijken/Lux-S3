@@ -18,7 +18,6 @@ class PPOAgent(nn.Module):
         relic_positions,
         tile_board,
         energy_board,
-        team_id,
     ):
 
         # Create unit board
@@ -35,7 +34,9 @@ class PPOAgent(nn.Module):
         enemy_coords = enemy_units[enemy_valid]
 
         # Set all positions on the board
-        unit_board = unit_board.at[friendly_coords[:, 0], friendly_coords[:, 1]].set(1)
+        unit_board = unit_board.at[friendly_coords[:, 0], friendly_coords[:, 1]].set(
+            1
+        )  # TODO make additive
         unit_board = unit_board.at[enemy_coords[:, 0], enemy_coords[:, 1]].set(-1)
 
         # Create the energy board for units
@@ -84,7 +85,6 @@ class PPOAgent(nn.Module):
         )
         return board_state_tensor[None, ...]
 
-    @partial(jax.jit, static_argnums=(1,))
     def get_relevant_info(self, obs):
         # Concatenate unit and energy per unit info
         unit_positions = jnp.array(obs["units"]["position"])
@@ -135,9 +135,7 @@ class PPOAgent(nn.Module):
         x = nn.Dense(features=64)(embedding)
         x = nn.relu(x)
         action_logits = nn.Dense(features=6)(x)
-        x_coord = nn.Dense(features=4)(x)
-        y_coord = nn.Dense(features=4)(x)
-        return nn.softmax(action_logits), nn.softmax(x_coord), nn.softmax(y_coord)
+        return nn.softmax(action_logits)
 
     @nn.compact
     def __call__(
@@ -155,5 +153,5 @@ class PPOAgent(nn.Module):
         )
         embedding = self.cnn_embedder(board_state_tensor, unit_info=unit_info)
         value = self.critic(embedding)
-        action_logits, x_coord_logits, y_coord_logits = self.actor(embedding)
-        return value, action_logits, x_coord_logits, y_coord_logits
+        action_probs = self.actor(embedding)
+        return value, action_probs
