@@ -5,7 +5,7 @@ from jax import random, grad, value_and_grad
 import random
 import numpy as np
 from typing import Any, Tuple
-from utils import sample_action
+import optax
 
 
 class PPOLoss(nn.Module):
@@ -29,6 +29,27 @@ class PPOLoss(nn.Module):
         num_samples = len(observations)
         indices = list(range(num_samples))
         random.shuffle(indices)
+
+        for i in range(0, num_samples, self.minibatch_size):
+            batch_indices = indices[i : i + self.minibatch_size]
+            obs_batch = jnp.stack([observations[j] for j in batch_indices])
+            actions_batch = jnp.stack([actions[j] for j in batch_indices])
+            old_log_probs_batch = jnp.array([old_log_probs[j] for j in batch_indices])
+            advantages_batch = jnp.array([advantages[j] for j in batch_indices])
+            returns_batch = jnp.array([returns[j] for j in batch_indices])
+
+            loss, grads = value_and_grad(self.loss_fn)(
+                params,
+                agent,
+                obs_batch,
+                actions_batch,
+                old_log_probs_batch,
+                advantages_batch,
+                returns_batch,
+            )
+            updates, opt_state = self.optimizer.update(grads, opt_state, params)
+            params = optax.apply_updates(params, updates)
+        return params, opt_state
 
     def loss_fn(
         self,
