@@ -2,6 +2,7 @@ import jax
 import jax.numpy as jnp
 from flax import linen as nn
 from jax import random, grad, value_and_grad
+import random
 import numpy as np
 from typing import Any, Tuple
 from utils import sample_action
@@ -13,6 +14,7 @@ class PPOLoss(nn.Module):
     lambda_: float = 0.95
     c1: float = 0.5
     c2: float = 0.01
+    minibatch_size: int = 10
     key = jax.random.PRNGKey(1480928)
 
     def __call__(self, params, trajectory, agent):
@@ -23,12 +25,26 @@ class PPOLoss(nn.Module):
             trajectory.advantages,
             trajectory.returns,
         )
+
+        num_samples = len(observations)
+        indices = list(range(num_samples))
+        random.shuffle(indices)
+
+    def loss_fn(
+        self,
+        params,
+        agent,
+        obs_batch,
+        actions_batch,
+        old_log_probs_batch,
+        advantages_batch,
+        returns_batch,
+    ):
         # Recompute log_probs and values for the entire trajectory
         new_values = []
         new_log_probs = []
-        for i in range(len(observations)):  # Loop over the full trajectory (101 steps)
-            obs = observations[i]
-            action = actions[i]
+        for i, obs in enumerate(obs_batch):  # Loop over the full trajectory (101 steps)
+            action = actions_batch[i]
             (
                 unit_positions,
                 unit_energies,
@@ -55,25 +71,32 @@ class PPOLoss(nn.Module):
                     new_log_probs.append(0)
                     new_values.append(0)
 
-        new_values = jnp.vstack(jnp.array(new_values))
-        new_log_probs = jnp.vstack(jnp.array(new_log_probs))
+        # Make the lists into a jnp array for easier computation
+        new_log_probs = jnp.vstack(np.array(new_log_probs))
+        old_log_probs = jnp.vstack(np.array(old_log_probs_batch))
 
-        # PPO Clipping
+        # Calculate the ratios
         ratio = jnp.exp(new_log_probs - old_log_probs)
-        clip_adv = jnp.clip(ratio, 1 - self.epsilon, 1 + self.epsilon) * advantages
-        actor_loss = -jnp.mean(jnp.minimum(ratio * advantages, clip_adv))
 
-        # Critic Loss (MSE loss between predicted values and returns)
-        critic_loss = jnp.mean((new_values - returns) ** 2)
+        # Calculate the surrogate objectives
+        clipped_ratio = jnp.clip(ratio, 1.0 - self.epsilon, 1.0 + self.epsilon)
+        surrogate1 = ratio * advantages_batch
+        surrogate2 = clipped_ratio * advantages_batch
 
-        # Entropy Loss (encourages exploration)
-        entropy_loss = -jnp.mean(
-            jnp.sum(jnp.exp(new_log_probs) * new_log_probs, axis=-1)
-        )
+        # Calculate the policy loss
+        policy_loss = -jnp.mean(jnp.minimum(surrogate1, surrogate2))
 
-        # Combined loss
-        total_loss = actor_loss + self.c1 * critic_loss + self.c2 * entropy_loss
-        return total_loss
+        # Value loss
+        value_loss = jnp.mean((returns_batch - new_values) ** 2)
+
+        # Cross-entropy loss for action probabilities
+        # TODO this is completely copy pasted does this even work???
+        action_log_probs = jnp.take_along_axis(
+            new_log_probs, actions_batch[..., None], axis=-1
+        ).squeeze(-1)
+        cross_entropy_loss = -jnp.mean(action_log_probs)
+
+        return policy_loss + self.c1 * value_loss + self.c2 * cross_entropy_loss
 
     def calculate_advantage(self, trajectory):
         rewards = jnp.array(trajectory.rewards)
