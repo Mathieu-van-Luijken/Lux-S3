@@ -32,7 +32,7 @@ class PPOLoss(nn.Module):
 
         for i in range(0, num_samples, self.minibatch_size):
             batch_indices = indices[i : i + self.minibatch_size]
-            obs_batch = jnp.stack([observations[j] for j in batch_indices])
+            obs_batch = [observations[j] for j in batch_indices]
             actions_batch = jnp.stack([actions[j] for j in batch_indices])
             old_log_probs_batch = jnp.array([old_log_probs[j] for j in batch_indices])
             advantages_batch = jnp.array([advantages[j] for j in batch_indices])
@@ -75,6 +75,7 @@ class PPOLoss(nn.Module):
             ) = agent.get_relevant_info(obs)
 
             for j, unit in enumerate(unit_positions[1]):
+                new_value = 0
                 if jnp.any(unit[1] >= 0):
                     unit_info = jnp.append(unit, unit_energies[1][j])[None, :]
                     value, move_probs = agent.apply(
@@ -86,15 +87,17 @@ class PPOLoss(nn.Module):
                         energy_board,
                         unit_info,
                     )
-                    new_log_probs.append(jnp.log(move_probs[0, action[j][0]]))
-                    new_values.append(value.item())
+                    new_log_probs.append(jnp.log(move_probs[0, action[j][0]]).item())
+                    new_value = value.item()
                 else:
                     new_log_probs.append(0)
-                    new_values.append(0)
+
+            new_values.append(new_value)
 
         # Make the lists into a jnp array for easier computation
         new_log_probs = jnp.vstack(np.array(new_log_probs))
         old_log_probs = jnp.vstack(np.array(old_log_probs_batch))
+        new_values = jnp.vstack(np.array(new_values))
 
         # Calculate the ratios
         ratio = jnp.exp(new_log_probs - old_log_probs)
@@ -111,7 +114,8 @@ class PPOLoss(nn.Module):
         value_loss = jnp.mean((returns_batch - new_values) ** 2)
 
         # Cross-entropy loss for action probabilities
-        # TODO this is completely copy pasted does this even work???
+        # TODO this is completely copy pasted does this even work???\
+        # NOTE no it does not yet,
         action_log_probs = jnp.take_along_axis(
             new_log_probs, actions_batch[..., None], axis=-1
         ).squeeze(-1)
