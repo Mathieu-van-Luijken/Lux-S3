@@ -140,7 +140,7 @@ def main(env, agent: PPOAgent, params, key):
                 trajectory.advantages, trajectory.returns = (
                     ppo_loss.calculate_advantage(trajectory)
                 )
-                loss = ppo_loss(params, trajectory, agent)
+                loss, optimizer_state = ppo_loss(params, trajectory, agent)
                 # state = train_step(state, trajectory, agent, clip_eps)
                 trajectory = Trajectory(
                     [], [], [], [], []

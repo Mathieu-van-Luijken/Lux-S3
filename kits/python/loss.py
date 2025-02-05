@@ -15,6 +15,7 @@ class PPOLoss(nn.Module):
     c1: float = 0.5
     c2: float = 0.01
     minibatch_size: int = 10
+    optimizer: optax.adam = optax.adam(learning_rate=0.001)
     key = jax.random.PRNGKey(1480928)
 
     def __call__(self, params, trajectory, agent):
@@ -64,6 +65,7 @@ class PPOLoss(nn.Module):
         # Recompute log_probs and values for the entire trajectory
         new_values = []
         new_log_probs = []
+        new_probs = []
         for i, obs in enumerate(obs_batch):  # Loop over the full trajectory (101 steps)
             action = actions_batch[i]
             (
@@ -87,6 +89,9 @@ class PPOLoss(nn.Module):
                         energy_board,
                         unit_info,
                     )
+                    new_probs.append(
+                        move_probs.primal
+                    )  # NOTE i have absolutely no idea why it is primal
                     new_log_probs.append(jnp.log(move_probs[0, action[j][0]]).item())
                     new_value = value.item()
                 else:
@@ -98,6 +103,7 @@ class PPOLoss(nn.Module):
         new_log_probs = jnp.vstack(np.array(new_log_probs))
         old_log_probs = jnp.vstack(np.array(old_log_probs_batch))
         new_values = jnp.vstack(np.array(new_values))
+        new_probs = jnp.vstack(np.array(new_probs))
 
         # Calculate the ratios
         ratio = jnp.exp(new_log_probs - old_log_probs)
@@ -114,14 +120,10 @@ class PPOLoss(nn.Module):
         value_loss = jnp.mean((returns_batch - new_values) ** 2)
 
         # Cross-entropy loss for action probabilities
-        # TODO this is completely copy pasted does this even work???\
-        # NOTE no it does not yet,
-        action_log_probs = jnp.take_along_axis(
-            new_log_probs, actions_batch[..., None], axis=-1
-        ).squeeze(-1)
-        cross_entropy_loss = -jnp.mean(action_log_probs)
+        entropy = -jnp.sum(new_probs * jnp.log(new_probs + 1e-8), axis=-1)
+        entropy_loss = jnp.mean(entropy)
 
-        return policy_loss + self.c1 * value_loss + self.c2 * cross_entropy_loss
+        return policy_loss + self.c1 * value_loss + self.c2 * entropy_loss
 
     def calculate_advantage(self, trajectory):
         rewards = jnp.array(trajectory.rewards)
