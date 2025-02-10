@@ -15,10 +15,13 @@ class PPOLoss(nn.Module):
     c1: float = 0.5
     c2: float = 0.01
     minibatch_size: int = 10
-    optimizer: optax.adam = optax.adam(learning_rate=0.001)
-    key = jax.random.PRNGKey(1480928)
+    learning_rate: float = 0.001
 
-    def __call__(self, params, trajectory, agent):
+    def setup(self):
+        self.optimizer = optax.adam(self.learning_rate)
+        self.key = jax.random.PRNGKey(1480928)
+
+    def __call__(self, params, trajectory, agent, key, opt_state):
         observations, actions, old_log_probs, advantages, returns = (
             trajectory.observations,
             trajectory.actions,
@@ -28,16 +31,34 @@ class PPOLoss(nn.Module):
         )
 
         num_samples = len(observations)
-        indices = list(range(num_samples))
-        random.shuffle(indices)
+        perm = jax.random.permutation(key, num_samples)
 
-        for i in range(0, num_samples, self.minibatch_size):
-            batch_indices = indices[i : i + self.minibatch_size]
-            obs_batch = [observations[j] for j in batch_indices]
-            actions_batch = jnp.stack([actions[j] for j in batch_indices])
-            old_log_probs_batch = jnp.array([old_log_probs[j] for j in batch_indices])
-            advantages_batch = jnp.array([advantages[j] for j in batch_indices])
-            returns_batch = jnp.array([returns[j] for j in batch_indices])
+        shuffled_obs = [observations[i] for i in perm]
+
+        shuffled_actions = jnp.array([actions[i] for i in perm])
+        shuffled_old_log_probs = jnp.array([old_log_probs[i] for i in perm])
+        shuffled_advantages = jnp.array([advantages[i] for i in perm])
+        shuffled_returns = jnp.array([returns[i] for i in perm])
+
+        def batch_update(carry, batch_idx):
+            params, opt_state = carry
+
+            current_batch_size = jnp.minimum(
+                self.minibatch_size, num_samples - batch_idx
+            )
+            obs_batch = shuffled_obs[batch_idx : batch_idx + current_batch_size]
+            actions_batch = jax.lax.dynamic_slice(
+                shuffled_actions, (batch_idx,), (self.minibatch_size,)
+            )
+            old_log_probs_batch = jax.lax.dynamic_slice(
+                shuffled_old_log_probs, (batch_idx,), (self.minibatch_size,)
+            )
+            advantages_batch = jax.lax.dynamic_slice(
+                shuffled_advantages, (batch_idx,), (self.minibatch_size,)
+            )
+            returns_batch = jax.lax.dynamic_slice(
+                shuffled_returns, (batch_idx,), (self.minibatch_size,)
+            )
 
             loss, grads = value_and_grad(self.loss_fn)(
                 params,
@@ -48,9 +69,16 @@ class PPOLoss(nn.Module):
                 advantages_batch,
                 returns_batch,
             )
-            updates, opt_state = self.optimizer.update(grads, opt_state, params)
+            updates, opt_state = self.optimizer.update(grads, opt_state)
             params = optax.apply_updates(params, updates)
-        return params, opt_state
+            return (params, opt_state), loss
+
+        (params, opt_state), losses = jax.lax.scan(
+            lambda carry, batch_idx: batch_update(carry, batch_idx),
+            (params, opt_state),
+            jnp.arange(0, num_samples, self.minibatch_size),
+        )
+        return params, opt_state, jnp.mean(losses)
 
     def loss_fn(
         self,
@@ -66,15 +94,8 @@ class PPOLoss(nn.Module):
         new_values = []
         new_log_probs = []
         new_probs = []
-        for i, obs in enumerate(obs_batch):  # Loop over the full trajectory (101 steps)
+        for i, obs in enumerate(obs_batch):
             action = actions_batch[i]
-            (
-                unit_positions,
-                unit_energies,
-                relic_positions,
-                tile_board,
-                energy_board,
-            ) = agent.get_relevant_info(obs)
 
             for j, unit in enumerate(unit_positions[1]):
                 new_value = 0

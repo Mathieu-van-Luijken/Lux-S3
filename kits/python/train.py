@@ -33,20 +33,21 @@ class Trajectory:
 def init_agent(key):
     # Initialize the gameplay agent
     ppo_agent = PPOAgent()
+
+    sample_player_unit_positions = jax.numpy.zeros((16, 2), dtype=jnp.int16)
     sample_positions = jax.numpy.zeros((2, 16, 2), dtype=jnp.int16)
     sample_energies = jax.numpy.zeros((2, 16), dtype=jnp.int16)
     sample_relics = jax.numpy.zeros((6, 2), dtype=jnp.int16)
     sample_tiles = jax.numpy.zeros((24, 24), dtype=jnp.int16)
     sample_energy = jax.numpy.zeros((24, 24), dtype=jnp.int16)
-    sample_unit = jax.numpy.zeros((1, 3), dtype=jnp.int16)
     params = ppo_agent.init(
         key,
         sample_positions,
+        sample_player_unit_positions,
         sample_energies,
         sample_relics,
         sample_tiles,
         sample_energy,
-        sample_unit,
     )
     return ppo_agent, params
 
@@ -54,10 +55,11 @@ def init_agent(key):
 def main(env, agent: PPOAgent, params, key):
     ppo_loss = PPOLoss()
     num_episodes = 1000
-    batch_size = 64
+    nr_updates = 10
     optimizer = optax.adam(learning_rate=3e-4)
     opt_state = optimizer.init(params=params)
     pbar = tqdm(total=100)
+
     for episode in range(num_episodes):
         obs, info = env.reset()
         done = False
@@ -78,36 +80,33 @@ def main(env, agent: PPOAgent, params, key):
                     traj_obs = obs["player_1"]
                     (
                         unit_positions,
+                        player_unit_positions,
                         unit_energies,
                         relic_positions,
                         tile_board,
                         energy_board,
-                    ) = agent.get_relevant_info(obs[f"player_{player}"])
-                    traj_value = 0
-                    for i, unit in enumerate(unit_positions[player]):
-                        if jnp.any(unit[1] >= 0):
-                            unit_info = jnp.append(unit, unit_energies[player][i])[
-                                None, :
-                            ]
-                            value, move_probs = agent.apply(
-                                params,
-                                unit_positions,
-                                unit_energies,
-                                relic_positions,
-                                tile_board,
-                                energy_board,
-                                unit_info,
-                            )
-                            action = sample_action(key=key, move_probs=move_probs)
-                            actions.append(action)
-                            log_probs.append(jnp.log(move_probs[0, action[0]]))
-                            traj_value = value.item()
-                        else:
-                            actions.append([0, 0, 0])
-                            log_probs.append(0)
-                            values.append(0)
+                    ) = agent.get_relevant_info(obs[f"player_{player}"], player)
 
-                    traj_actions = jnp.vstack(jnp.array(actions))
+                    value, move_probs = agent.apply(
+                        params,
+                        unit_positions,
+                        player_unit_positions,
+                        unit_energies,
+                        relic_positions,
+                        tile_board,
+                        energy_board,
+                    )
+
+                    # Save the correct values
+                    traj_actions = sample_action(
+                        key=key,
+                        move_probs=move_probs,
+                        num_units=unit_positions[0].shape[0],
+                    )
+                    # NOTE need to fix this
+                    log_probs.append(jnp.log(move_probs[0, action[0]]))
+
+                    traj_value = value.item()
                     traj_log_probs = jnp.vstack(jnp.array(log_probs))
 
                 else:
@@ -140,7 +139,14 @@ def main(env, agent: PPOAgent, params, key):
                 trajectory.advantages, trajectory.returns = (
                     ppo_loss.calculate_advantage(trajectory)
                 )
-                loss, optimizer_state = ppo_loss(params, trajectory, agent)
+                for i in range(nr_updates):
+                    params, opt_state, batch_loss = ppo_loss(
+                        params=params,
+                        trajectory=trajectory,
+                        agent=agent,
+                        key=key,
+                        opt_state=opt_state,
+                    )
                 # state = train_step(state, trajectory, agent, clip_eps)
                 trajectory = Trajectory(
                     [], [], [], [], []

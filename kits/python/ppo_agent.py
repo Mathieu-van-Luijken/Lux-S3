@@ -85,8 +85,12 @@ class PPOAgent(nn.Module):
         )
         return board_state_tensor[None, ...]
 
-    def get_relevant_info(self, obs):
+    def get_relevant_info(self, obs, player):
         # Concatenate unit and energy per unit info
+        player_unit_positions = jnp.array(obs["units"]["position"][player])
+        valid_mask = player_unit_positions[:, 0] != -1
+        player_unit_positions = player_unit_positions[valid_mask]
+
         unit_positions = jnp.array(obs["units"]["position"])
         unit_energies = jnp.array(obs["units"]["energy"]) / 100
 
@@ -99,6 +103,7 @@ class PPOAgent(nn.Module):
 
         return (
             unit_positions,
+            player_unit_positions,
             unit_energies,
             relic_positions,
             tile_board,
@@ -106,7 +111,7 @@ class PPOAgent(nn.Module):
         )
 
     @nn.compact
-    def cnn_embedder(self, board_state_tensor, unit_info):
+    def cnn_embedder(self, board_state_tensor):
         """Embeds the board state tensor into a 128-dimensional space."""
         x = board_state_tensor.transpose(0, 2, 3, 1)  # Add channel dimension
         x = nn.Conv(features=16, kernel_size=(3, 3), padding="SAME")(x)
@@ -118,8 +123,8 @@ class PPOAgent(nn.Module):
         x = x.reshape((x.shape[0], -1))  # Flatten
         x = nn.Dense(features=128)(x)
         board_embedding = nn.relu(x)
-        embedding = jnp.concat([board_embedding, unit_info], axis=-1)
-        return embedding
+        # Somehow need to input the correct unit positions
+        return board_embedding
 
     @nn.compact
     def critic(self, embedding):
@@ -130,7 +135,13 @@ class PPOAgent(nn.Module):
         return value
 
     @nn.compact
-    def actor(self, embedding):
+    def actor(self, embedding, player_unit_positions):
+        board_embedding_broadcasted = jnp.broadcast_to(
+            embedding, (player_unit_positions.shape[0], 128)
+        )
+        embedding = jnp.concat(
+            [board_embedding_broadcasted, player_unit_positions], axis=-1
+        )
         """Computes the action logits."""
         x = nn.Dense(features=64)(embedding)
         x = nn.relu(x)
@@ -141,17 +152,21 @@ class PPOAgent(nn.Module):
     def __call__(
         self,
         unit_positions,
+        player_unit_positions,
         unit_energies,
         relic_positions,
         tile_board,
         energy_board,
-        unit_info,
     ):
         """Forward pass of the PPO agent."""
         board_state_tensor = self.preproces(
-            unit_positions, unit_energies, relic_positions, tile_board, energy_board
+            unit_positions,
+            unit_energies,
+            relic_positions,
+            tile_board,
+            energy_board,
         )
-        embedding = self.cnn_embedder(board_state_tensor, unit_info=unit_info)
+        embedding = self.cnn_embedder(board_state_tensor)
         value = self.critic(embedding)
-        action_probs = self.actor(embedding)
+        action_probs = self.actor(embedding, player_unit_positions)
         return value, action_probs
