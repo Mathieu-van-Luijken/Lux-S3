@@ -5,6 +5,7 @@ from jax import random, grad, value_and_grad
 import random
 import numpy as np
 from typing import Any, Tuple
+from utils import dynamic_slice
 import optax
 
 
@@ -22,48 +23,83 @@ class PPOLoss(nn.Module):
         self.key = jax.random.PRNGKey(1480928)
 
     def __call__(self, params, trajectory, agent, key, opt_state):
-        observations, actions, old_log_probs, advantages, returns = (
-            trajectory.observations,
+        (
+            unit_positions,
+            player_unit_positions,
+            unit_energies,
+            relic_positions,
+            tile_board,
+            energy_board,
+            actions,
+            log_probs,
+            advantages,
+            returns,
+        ) = (
+            trajectory.unit_positions,
+            trajectory.player_unit_positions,
+            trajectory.unit_energies,
+            trajectory.relic_positions,
+            trajectory.tile_board,
+            trajectory.energy_board,
             trajectory.actions,
             trajectory.log_probs,
             trajectory.advantages,
             trajectory.returns,
         )
 
-        num_samples = len(observations)
+        num_samples = unit_positions.shape[0]
         perm = jax.random.permutation(key, num_samples)
 
-        shuffled_obs = [observations[i] for i in perm]
-
-        shuffled_actions = jnp.array([actions[i] for i in perm])
-        shuffled_old_log_probs = jnp.array([old_log_probs[i] for i in perm])
-        shuffled_advantages = jnp.array([advantages[i] for i in perm])
-        shuffled_returns = jnp.array([returns[i] for i in perm])
+        # Shuffle the data to obtain random batches
+        shuffled_unit_positions = unit_positions[perm]
+        shuffled_player_unit_positions = player_unit_positions[perm]
+        shuffled_unit_energies = unit_energies[perm]
+        shuffled_relic_positions = relic_positions[perm]
+        shuffled_tile_board = tile_board[perm]
+        shuffled_energy_board = energy_board[perm]
+        shuffled_actions = actions[perm]
+        shuffled_log_probs = log_probs[perm]
+        shuffled_advantages = advantages[perm]
+        shuffled_returns = returns[perm]
 
         def batch_update(carry, batch_idx):
             params, opt_state = carry
 
-            current_batch_size = jnp.minimum(
-                self.minibatch_size, num_samples - batch_idx
-            )
-            obs_batch = shuffled_obs[batch_idx : batch_idx + current_batch_size]
-            actions_batch = jax.lax.dynamic_slice(
-                shuffled_actions, (batch_idx,), (self.minibatch_size,)
-            )
-            old_log_probs_batch = jax.lax.dynamic_slice(
-                shuffled_old_log_probs, (batch_idx,), (self.minibatch_size,)
-            )
-            advantages_batch = jax.lax.dynamic_slice(
-                shuffled_advantages, (batch_idx,), (self.minibatch_size,)
-            )
-            returns_batch = jax.lax.dynamic_slice(
-                shuffled_returns, (batch_idx,), (self.minibatch_size,)
+            (
+                unit_positions_batch,
+                player_unit_positions_batch,
+                unit_energies_batch,
+                relic_positions_batch,
+                tile_board_batch,
+                energy_board_batch,
+                actions_batch,
+                old_log_probs_batch,
+                advantages_batch,
+                returns_batch,
+            ) = dynamic_slice(
+                unit_positions=shuffled_unit_positions,
+                player_unit_positions=shuffled_player_unit_positions,
+                unit_energies=shuffled_unit_energies,
+                relic_positions=shuffled_relic_positions,
+                tile_board=shuffled_tile_board,
+                energy_board=shuffled_energy_board,
+                actions=shuffled_actions,
+                old_log_probs=shuffled_log_probs,
+                advantages=shuffled_advantages,
+                returns=shuffled_returns,
+                minibatch_size=self.minibatch_size,
+                batch_idx=batch_idx,
             )
 
             loss, grads = value_and_grad(self.loss_fn)(
                 params,
                 agent,
-                obs_batch,
+                unit_positions_batch,
+                player_unit_positions_batch,
+                unit_energies_batch,
+                relic_positions_batch,
+                tile_board_batch,
+                energy_board_batch,
                 actions_batch,
                 old_log_probs_batch,
                 advantages_batch,
@@ -84,41 +120,27 @@ class PPOLoss(nn.Module):
         self,
         params,
         agent,
-        obs_batch,
+        unit_positions_batch,
+        player_unit_positions_batch,
+        unit_energies_batch,
+        relic_positions_batch,
+        tile_board_batch,
+        energy_board_batch,
         actions_batch,
         old_log_probs_batch,
         advantages_batch,
         returns_batch,
     ):
-        # Recompute log_probs and values for the entire trajectory
-        new_values = []
-        new_log_probs = []
-        new_probs = []
-        for i, obs in enumerate(obs_batch):
-            action = actions_batch[i]
 
-            for j, unit in enumerate(unit_positions[1]):
-                new_value = 0
-                if jnp.any(unit[1] >= 0):
-                    unit_info = jnp.append(unit, unit_energies[1][j])[None, :]
-                    value, move_probs = agent.apply(
-                        params,
-                        unit_positions,
-                        unit_energies,
-                        relic_positions,
-                        tile_board,
-                        energy_board,
-                        unit_info,
-                    )
-                    new_probs.append(
-                        move_probs.primal
-                    )  # NOTE i have absolutely no idea why it is primal
-                    new_log_probs.append(jnp.log(move_probs[0, action[j][0]]).item())
-                    new_value = value.item()
-                else:
-                    new_log_probs.append(0)
-
-            new_values.append(new_value)
+        value, move_probs = agent.apply(
+            params,
+            unit_positions_batch,
+            player_unit_positions_batch,
+            unit_energies_batch,
+            relic_positions_batch,
+            tile_board_batch,
+            energy_board_batch,
+        )
 
         # Make the lists into a jnp array for easier computation
         new_log_probs = jnp.vstack(np.array(new_log_probs))

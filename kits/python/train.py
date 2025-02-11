@@ -43,6 +43,8 @@ class Trajectory:
     values: jnp.ndarray = field(
         default_factory=lambda: jnp.array([], dtype=jnp.float32)
     )
+    advantages: jnp.ndarray = field(default_factory=lambda: jnp.array([]))
+    returns: jnp.ndarray = field(default_factory=lambda: jnp.array([]))
 
     def __post_init__(self):
         """Initialize arrays with fixed preallocated size."""
@@ -56,6 +58,8 @@ class Trajectory:
         self.log_probs = jnp.zeros((self.max_steps, 16))
         self.rewards = jnp.zeros(self.max_steps, dtype=jnp.float32)
         self.values = jnp.zeros(self.max_steps, dtype=jnp.float32)
+        self.advantages = jnp.zeros(self.max_steps, dtype=jnp.float32)
+        self.returns = jnp.zeros(self.max_steps, dtype=jnp.float32)
 
     def add_step(self, **kwargs):
         """

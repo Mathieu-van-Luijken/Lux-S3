@@ -27,3 +27,91 @@ def calc_log_probs(move_probs, actions, num_units):
         ]
         output_log_probs = output_log_probs.at[:existing_units].set(selected_log_probs)
     return output_log_probs
+
+
+def dynamic_slice(
+    unit_positions,
+    player_unit_positions,
+    unit_energies,
+    relic_positions,
+    tile_board,
+    energy_board,
+    actions,
+    old_log_probs,
+    advantages,
+    returns,
+    minibatch_size,
+    batch_idx,
+):
+    # Use dynamic slice to select the batch for each array
+    unit_positions_batch = jax.lax.dynamic_slice(
+        unit_positions,
+        start_indices=(batch_idx, 0, 0, 0),
+        slice_sizes=(minibatch_size, 2, 16, 2),
+    )
+
+    player_unit_positions_batch = jax.lax.dynamic_slice(
+        player_unit_positions,
+        start_indices=(batch_idx, 0, 0),
+        slice_sizes=(minibatch_size, 16, 2),
+    )
+
+    unit_energies_batch = jax.lax.dynamic_slice(
+        unit_energies,
+        start_indices=(batch_idx, 0, 0),
+        slice_sizes=(minibatch_size, 2, 16),
+    )
+
+    relic_positions_batch = jax.lax.dynamic_slice(
+        relic_positions,
+        start_indices=(batch_idx, 0, 0),
+        slice_sizes=(minibatch_size, 6, 2),
+    )
+
+    tile_board_batch = jax.lax.dynamic_slice(
+        tile_board,
+        start_indices=(batch_idx, 0, 0),
+        slice_sizes=(minibatch_size, 24, 24),
+    )
+
+    energy_board_batch = jax.lax.dynamic_slice(
+        energy_board,
+        start_indices=(batch_idx, 0, 0),
+        slice_sizes=(minibatch_size, 24, 24),
+    )
+
+    actions_batch = jax.lax.dynamic_slice(
+        actions,
+        start_indices=(batch_idx, 0, 0),
+        slice_sizes=(minibatch_size, 16, 3),
+    )
+
+    old_log_probs_batch = jax.lax.dynamic_slice(
+        old_log_probs,
+        start_indices=(batch_idx, 0),
+        slice_sizes=(minibatch_size, 16),
+    )
+
+    advantages_batch = jax.lax.dynamic_slice(
+        advantages,
+        start_indices=(batch_idx,),
+        slice_sizes=(minibatch_size,),
+    )
+
+    returns_batch = jax.lax.dynamic_slice(
+        returns,
+        start_indices=(batch_idx,),
+        slice_sizes=(minibatch_size,),
+    )
+    return (
+        unit_positions_batch,
+        player_unit_positions_batch,
+        unit_energies_batch,
+        relic_positions_batch,
+        tile_board_batch,
+        energy_board_batch,
+        actions_batch,
+        old_log_probs_batch,
+        advantages_batch,
+        returns_batch,
+    )
