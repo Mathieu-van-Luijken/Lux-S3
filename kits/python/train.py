@@ -7,7 +7,7 @@ from typing import Any, Tuple
 from dataclasses import dataclass, field
 from tqdm import tqdm
 
-from ppo_agent import PPOAgent, preproces
+from ppo_agent import PPOAgent, preproces, get_relevant_info
 from loss import PPOLoss
 from reward import calculate_reward
 from utils import sample_action, calc_log_probs
@@ -22,6 +22,10 @@ from src.luxai_runner.utils import to_json
 
 from dataclasses import dataclass, field
 import jax.numpy as jnp
+from flax.training import orbax_utils
+import orbax.checkpoint
+
+from datetime import datetime
 
 
 @dataclass
@@ -94,7 +98,7 @@ def init_agent(key):
 
 def main(env, agent: PPOAgent, params, key):
     ppo_loss = PPOLoss()
-    num_episodes = 1000
+    num_episodes = 5
     nr_updates = 10
     update_step = 101
 
@@ -102,6 +106,9 @@ def main(env, agent: PPOAgent, params, key):
     opt_state = optimizer.init(params=params)
     pbar = tqdm(total=101)
     trajectory = Trajectory(max_steps=update_step)
+
+    checkpointer = orbax.checkpoint.PyTreeCheckpointer()
+    now = datetime.now().strftime("%m%d%H%M")
 
     for episode in range(num_episodes):
         obs, info = env.reset()
@@ -124,7 +131,7 @@ def main(env, agent: PPOAgent, params, key):
                         tile_board,
                         energy_board,
                         num_active_units,
-                    ) = agent.get_relevant_info(obs[f"player_{player}"], player)
+                    ) = get_relevant_info(obs[f"player_{player}"], player)
                     board_state = preproces(
                         unit_positions=unit_positions,
                         unit_energies=unit_energies,
@@ -147,6 +154,7 @@ def main(env, agent: PPOAgent, params, key):
                             unit_positions[0].shape[0], dtype=jnp.int32
                         ),
                     )
+                    # Calculate and save the log proabilities
                     traj_log_probs = calc_log_probs(
                         move_probs=move_probs,
                         actions=traj_actions,
@@ -161,11 +169,15 @@ def main(env, agent: PPOAgent, params, key):
             (
                 obs,
                 state,
-                _,
-                _,
+                reward,
+                done,
                 _,
             ) = env.step(actions_dict)
 
+            # Obtain done state for one player only
+            done = done["player_0"]
+
+            # Obtain the reward
             episode_reward += calculate_reward(obs["player_1"])
 
             # Update the trajectory:
@@ -185,6 +197,7 @@ def main(env, agent: PPOAgent, params, key):
                 trajectory.advantages, trajectory.returns = (
                     ppo_loss.calculate_advantage(trajectory)
                 )
+                # Run the training loop a number of times
                 for i in range(nr_updates):
                     params, opt_state, batch_loss = ppo_loss(
                         params=params,
@@ -193,8 +206,16 @@ def main(env, agent: PPOAgent, params, key):
                         key=key,
                         opt_state=opt_state,
                     )
-                # state = train_step(state, trajectory, agent, clip_eps)
+                    print(
+                        f"Epoch: {episode} \n"
+                        f"Update Loop: {i} \n"
+                        f"Training Loss: {batch_loss}"
+                    )
                 trajectory.reset()  # Reset trajectory for next batch
+
+        # Save the model parameters
+        checkpoint_path = os.path.abspath(f"checkpoints/{now}_{episode}")
+        checkpointer.save(checkpoint_path, params)
 
 
 if __name__ == "__main__":

@@ -112,37 +112,38 @@ def preproces(
     return board_state_tensor[None, ...]
 
 
+def get_relevant_info(obs, player):
+    # Concatenate unit and energy per unit info
+    player_unit_positions = jnp.array(obs["units"]["position"][player])
+
+    unit_positions = jnp.array(obs["units"]["position"])
+    unit_energies = jnp.array(obs["units"]["energy"]) / 100
+
+    # Obtain Relic positions
+    relic_positions = jnp.array(obs["relic_nodes"])
+
+    # Get the board energies
+    tile_board = jnp.array(obs["map_features"]["tile_type"])
+    energy_board = jnp.array(obs["map_features"]["energy"])
+
+    # num active units:
+    valid_mask = player_unit_positions[:, 0] != -1
+    num_active_units = jnp.asarray(
+        player_unit_positions[valid_mask].shape[0], dtype=jnp.int32
+    )
+
+    return (
+        unit_positions,
+        player_unit_positions,
+        unit_energies,
+        relic_positions,
+        tile_board,
+        energy_board,
+        num_active_units,
+    )
+
+
 class PPOAgent(nn.Module):
-
-    def get_relevant_info(self, obs, player):
-        # Concatenate unit and energy per unit info
-        player_unit_positions = jnp.array(obs["units"]["position"][player])
-
-        unit_positions = jnp.array(obs["units"]["position"])
-        unit_energies = jnp.array(obs["units"]["energy"]) / 100
-
-        # Obtain Relic positions
-        relic_positions = jnp.array(obs["relic_nodes"])
-
-        # Get the board energies
-        tile_board = jnp.array(obs["map_features"]["tile_type"])
-        energy_board = jnp.array(obs["map_features"]["energy"])
-
-        # num active units:
-        valid_mask = player_unit_positions[:, 0] != -1
-        num_active_units = jnp.asarray(
-            player_unit_positions[valid_mask].shape[0], dtype=jnp.int32
-        )
-
-        return (
-            unit_positions,
-            player_unit_positions,
-            unit_energies,
-            relic_positions,
-            tile_board,
-            energy_board,
-            num_active_units,
-        )
 
     @nn.compact
     def cnn_embedder(self, board_state_tensor):

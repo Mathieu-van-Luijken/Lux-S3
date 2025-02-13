@@ -1,11 +1,12 @@
 from lux.utils import direction_to
 import sys
 import numpy as np
-from ppo_agent import PPOAgent
+from ppo_agent import PPOAgent, preproces, get_relevant_info
 import jax.numpy as jnp
 import jax
 import flax.serialization
 from jax.nn import sigmoid
+from utils import sample_action
 
 
 class Agent:
@@ -24,20 +25,15 @@ class Agent:
         # Initialize the gameplay agent
         self.rng = jax.random.PRNGKey(2504)
         self.ppo_agent = PPOAgent(self.opp_player)
-        sample_positions = jax.numpy.zeros((2, 16, 2), dtype=jnp.int32)
-        sample_energies = jax.numpy.zeros((2, 16), dtype=jnp.int32)
-        sample_relics = jax.numpy.zeros((6, 2), dtype=jnp.int32)
-        sample_tiles = jax.numpy.zeros((24, 24), dtype=jnp.int32)
-        sample_energy = jax.numpy.zeros((24, 24), dtype=jnp.int32)
-        sample_unit = jax.numpy.zeros((1, 3), dtype=jnp.int32)
+
+        key = jax.random.PRNGKey(2504)
+
+        sample_player_unit_positions = jax.numpy.zeros((16, 2), dtype=jnp.int32)
+        sample_board_state = jnp.zeros((1, 10, 24, 24), dtype=jnp.int32)
         self.params = self.ppo_agent.init(
-            self.rng,
-            sample_positions,
-            sample_energies,
-            sample_relics,
-            sample_tiles,
-            sample_energy,
-            sample_unit,
+            key,
+            sample_player_unit_positions,
+            sample_board_state,
         )
 
         # # Load parameters
@@ -71,27 +67,31 @@ class Agent:
         step is the current timestep number of the game starting from 0 going up to max_steps_in_match * match_count_per_episode - 1.
         """
 
-        unit_positions, unit_energies, relic_positions, tile_board, energy_board = (
-            self.ppo_agent.get_relevant_info(obs=obs)
+        (
+            unit_positions,
+            player_unit_positions,
+            unit_energies,
+            relic_positions,
+            tile_board,
+            energy_board,
+            num_active_units,
+        ) = get_relevant_info(obs, self.player)
+
+        board_state = preproces(
+            unit_positions=unit_positions,
+            unit_energies=unit_energies,
+            relic_positions=relic_positions,
+            tile_board=tile_board,
+            energy_board=energy_board,
+            player=self.player,
         )
 
         # Loop over all units and compute their actions
         actions = []
-        for i, unit in enumerate(unit_positions[self.team_id]):
-            if jnp.any(unit[1] >= 0):
-                unit_info = jnp.append(unit, unit_energies[self.team_id][i])[None, :]
-                value, move_probs, x_probs, y_probs = self.ppo_agent.apply(
-                    self.params,
-                    unit_positions,
-                    unit_energies,
-                    relic_positions,
-                    tile_board,
-                    energy_board,
-                    unit_info,
-                )
-                action = self.ppo_agent.sample_action(move_probs, x_probs, y_probs)
-                actions.append(action)
-            else:
-                actions.append([0, 0, 0])
-
-        return jnp.vstack(actions)
+        value, move_probs = self.ppo_agent.apply(
+            self.params,
+            board_state=board_state,
+            player_unit_positions=player_unit_positions,
+        )
+        actions = sample_action(key=self.key, move_probs=move_probs, num_units=16)
+        return actions
