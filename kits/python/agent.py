@@ -24,12 +24,12 @@ class Agent:
         # Initialize the gameplay agent
         self.rng = jax.random.PRNGKey(2504)
         self.ppo_agent = PPOAgent(self.opp_player)
-        sample_positions = jax.numpy.zeros((2, 16, 2), dtype=jnp.int16)
-        sample_energies = jax.numpy.zeros((2, 16), dtype=jnp.int16)
-        sample_relics = jax.numpy.zeros((6, 2), dtype=jnp.int16)
-        sample_tiles = jax.numpy.zeros((24, 24), dtype=jnp.int16)
-        sample_energy = jax.numpy.zeros((24, 24), dtype=jnp.int16)
-        sample_unit = jax.numpy.zeros((1, 3), dtype=jnp.int16)
+        sample_positions = jax.numpy.zeros((2, 16, 2), dtype=jnp.int32)
+        sample_energies = jax.numpy.zeros((2, 16), dtype=jnp.int32)
+        sample_relics = jax.numpy.zeros((6, 2), dtype=jnp.int32)
+        sample_tiles = jax.numpy.zeros((24, 24), dtype=jnp.int32)
+        sample_energy = jax.numpy.zeros((24, 24), dtype=jnp.int32)
+        sample_unit = jax.numpy.zeros((1, 3), dtype=jnp.int32)
         self.params = self.ppo_agent.init(
             self.rng,
             sample_positions,

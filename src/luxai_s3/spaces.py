@@ -14,7 +14,7 @@ class MultiDiscrete(Space):
         self.dist = self.high - self.low
         assert low.shape == high.shape
         self.shape = low.shape
-        self.dtype = jnp.int16
+        self.dtype = jnp.int32
 
     def sample(self, rng: chex.PRNGKey) -> chex.Array:
         return (

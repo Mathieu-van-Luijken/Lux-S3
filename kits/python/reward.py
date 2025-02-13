@@ -1,15 +1,17 @@
 # from src.luxai_s3.env import EnvObs
 
+
 def calculate_reward(envobs) -> float:
     """
-        Calculate the reward based on the environment observations.
+    Calculate the reward based on the environment observations.
 
-        Parameters:
-        envobs (EnvObs): An instance of EnvObs containing the environment observations.
+    Parameters:
+    envobs (EnvObs): An instance of EnvObs containing the environment observations.
 
-        Returns:
-        float: The calculated reward.
-        """
+    Returns:
+    float: The calculated reward.
+    """
+
     def process_relic_nodes(relic_nodes):
         """
         Process the relic nodes positions to calculate a reward component.
@@ -46,10 +48,10 @@ def calculate_reward(envobs) -> float:
         Returns:
         float: The reward component from the team points.
         """
-        
+
         # Example processing: sum the points of all teams
-        return sum(team_points *10)
-    
+        return sum(team_points * 10)
+
     def process_map_features(map_features):
         """
         Process the map features to calculate a reward component.
@@ -70,10 +72,12 @@ def calculate_reward(envobs) -> float:
         # process_units,
         process_team_points,
         process_map_features,
-        process_relic_nodes
+        process_relic_nodes,
     ]
 
     # Calculate the total reward by applying each function
-    total_reward = sum(func(envobs[func.__name__.replace('process_', '')]) for func in reward_functions)
+    total_reward = sum(
+        func(envobs[func.__name__.replace("process_", "")]) for func in reward_functions
+    )
 
     return total_reward
