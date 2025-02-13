@@ -130,7 +130,9 @@ class PPOAgent(nn.Module):
 
         # num active units:
         valid_mask = player_unit_positions[:, 0] != -1
-        num_active_units = player_unit_positions[valid_mask].shape[0]
+        num_active_units = jnp.asarray(
+            player_unit_positions[valid_mask].shape[0], dtype=jnp.int16
+        )
 
         return (
             unit_positions,

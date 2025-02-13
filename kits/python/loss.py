@@ -198,5 +198,10 @@ class PPOLoss(nn.Module):
         for t in reversed(range(len(rewards))):
             adv = deltas[t] + self.gamma * self.lambda_ * adv
             advantages = advantages.at[t].set(adv)
+
+        # Normalize advantages: subtract mean and divide by std (across the entire batch)
+        advantages = (advantages - jnp.mean(advantages)) / (
+            jnp.std(advantages) + 1e-8
+        )  # Avoid division by zero
         returns = advantages + values
         return advantages, returns

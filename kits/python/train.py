@@ -46,11 +46,11 @@ class Trajectory:
     def __post_init__(self):
         """Initialize arrays with fixed preallocated size."""
         self.player_unit_positions = jnp.zeros((self.max_steps, 16, 2), dtype=jnp.int16)
-        self.board_state = jnp.zeros((self.max_steps, 1, 10, 24, 24), dtype=jnp.int16)
+        self.board_state = jnp.zeros((self.max_steps, 1, 10, 24, 24), dtype=jnp.float32)
         self.num_active_units = jnp.zeros((self.max_steps, 1), dtype=jnp.int16)
         self.actions = jnp.zeros((self.max_steps, 16, 3), dtype=jnp.int16)
         self.log_probs = jnp.zeros((self.max_steps, 16), jnp.float32)
-        self.rewards = jnp.zeros(self.max_steps, dtype=jnp.float32)
+        self.rewards = jnp.zeros(self.max_steps, dtype=jnp.int32)
         self.values = jnp.zeros(self.max_steps, dtype=jnp.float32)
         self.advantages = jnp.zeros(self.max_steps, dtype=jnp.float32)
         self.returns = jnp.zeros(self.max_steps, dtype=jnp.float32)
@@ -150,7 +150,7 @@ def main(env, agent: PPOAgent, params, key):
                         actions=traj_actions,
                         num_units=unit_positions[0].shape[0],
                     )
-                    traj_value = value.item()
+                    traj_value = jnp.asarray(value.item(), dtype=jnp.float32)
                 else:
                     traj_actions = jnp.zeros((16, 3), dtype=jnp.int32)
 
