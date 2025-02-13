@@ -7,7 +7,7 @@ from typing import Any, Tuple
 from dataclasses import dataclass, field
 from tqdm import tqdm
 
-from ppo_agent import PPOAgent
+from ppo_agent import PPOAgent, preproces
 from loss import PPOLoss
 from reward import calculate_reward
 from utils import sample_action, calc_log_probs
@@ -29,12 +29,9 @@ class Trajectory:
     max_steps: int
     index: int = 0  # Tracks the current step
 
-    unit_positions: jnp.ndarray = field(default_factory=lambda: jnp.array([]))
     player_unit_positions: jnp.ndarray = field(default_factory=lambda: jnp.array([]))
-    unit_energies: jnp.ndarray = field(default_factory=lambda: jnp.array([]))
-    relic_positions: jnp.ndarray = field(default_factory=lambda: jnp.array([]))
-    tile_board: jnp.ndarray = field(default_factory=lambda: jnp.array([]))
-    energy_board: jnp.ndarray = field(default_factory=lambda: jnp.array([]))
+    board_state: jnp.ndarray = field(default_factory=lambda: jnp.array([]))
+    num_active_units: jnp.ndarray = field(default_factory=lambda: jnp.array([]))
     actions: jnp.ndarray = field(default_factory=lambda: jnp.array([], dtype=jnp.int32))
     log_probs: jnp.ndarray = field(default_factory=lambda: jnp.array([]))
     rewards: jnp.ndarray = field(
@@ -48,14 +45,11 @@ class Trajectory:
 
     def __post_init__(self):
         """Initialize arrays with fixed preallocated size."""
-        self.unit_positions = jnp.zeros((self.max_steps, 2, 16, 2))
-        self.player_unit_positions = jnp.zeros((self.max_steps, 16, 2))
-        self.unit_energies = jnp.zeros((self.max_steps, 2, 16))
-        self.relic_positions = jnp.zeros((self.max_steps, 6, 2))
-        self.tile_board = jnp.zeros((self.max_steps, 24, 24))
-        self.energy_board = jnp.zeros((self.max_steps, 24, 24))
-        self.actions = jnp.zeros((self.max_steps, 16, 3))
-        self.log_probs = jnp.zeros((self.max_steps, 16))
+        self.player_unit_positions = jnp.zeros((self.max_steps, 16, 2), dtype=jnp.int16)
+        self.board_state = jnp.zeros((self.max_steps, 1, 10, 24, 24), dtype=jnp.int16)
+        self.num_active_units = jnp.zeros((self.max_steps, 1), dtype=jnp.int16)
+        self.actions = jnp.zeros((self.max_steps, 16, 3), dtype=jnp.int16)
+        self.log_probs = jnp.zeros((self.max_steps, 16), jnp.float32)
         self.rewards = jnp.zeros(self.max_steps, dtype=jnp.float32)
         self.values = jnp.zeros(self.max_steps, dtype=jnp.float32)
         self.advantages = jnp.zeros(self.max_steps, dtype=jnp.float32)
@@ -89,19 +83,11 @@ def init_agent(key):
     ppo_agent = PPOAgent()
 
     sample_player_unit_positions = jax.numpy.zeros((16, 2), dtype=jnp.int16)
-    sample_positions = jax.numpy.zeros((2, 16, 2), dtype=jnp.int16)
-    sample_energies = jax.numpy.zeros((2, 16), dtype=jnp.int16)
-    sample_relics = jax.numpy.zeros((6, 2), dtype=jnp.int16)
-    sample_tiles = jax.numpy.zeros((24, 24), dtype=jnp.int16)
-    sample_energy = jax.numpy.zeros((24, 24), dtype=jnp.int16)
+    sample_board_state = jnp.zeros((1, 10, 24, 24), dtype=jnp.int16)
     params = ppo_agent.init(
         key,
-        sample_positions,
         sample_player_unit_positions,
-        sample_energies,
-        sample_relics,
-        sample_tiles,
-        sample_energy,
+        sample_board_state,
     )
     return ppo_agent, params
 
@@ -137,16 +123,20 @@ def main(env, agent: PPOAgent, params, key):
                         relic_positions,
                         tile_board,
                         energy_board,
+                        num_active_units,
                     ) = agent.get_relevant_info(obs[f"player_{player}"], player)
-
+                    board_state = preproces(
+                        unit_positions=unit_positions,
+                        unit_energies=unit_energies,
+                        relic_positions=relic_positions,
+                        tile_board=tile_board,
+                        energy_board=energy_board,
+                        player=player,
+                    )
                     value, move_probs = agent.apply(
                         params,
-                        unit_positions,
-                        player_unit_positions,
-                        unit_energies,
-                        relic_positions,
-                        tile_board,
-                        energy_board,
+                        board_state=board_state,
+                        player_unit_positions=player_unit_positions,
                     )
 
                     # Save the correct values
@@ -178,14 +168,9 @@ def main(env, agent: PPOAgent, params, key):
 
             # Update the trajectory:
             trajectory.add_step(
-                unit_positions=unit_positions,
-                player_unit_positions=unit_positions[
-                    1
-                ],  # TODO Unit positions are variable since we dont always have the same amount
-                unit_energies=unit_energies,
-                relic_positions=relic_positions,
-                tile_board=tile_board,
-                energy_board=energy_board,
+                player_unit_positions=player_unit_positions,
+                num_active_units=num_active_units,
+                board_state=board_state,
                 actions=traj_actions,
                 log_probs=traj_log_probs,
                 rewards=episode_reward,
