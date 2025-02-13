@@ -19,6 +19,7 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)) + "/../..")
 from src.luxai_s3.env import LuxAIS3Env
 from src.luxai_s3.wrappers import LuxAIS3GymEnv
 from src.luxai_runner.utils import to_json
+from agent import Agent
 
 from dataclasses import dataclass, field
 import jax.numpy as jnp

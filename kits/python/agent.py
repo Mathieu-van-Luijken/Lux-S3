@@ -1,5 +1,6 @@
 from lux.utils import direction_to
 import sys
+import os
 import numpy as np
 from ppo_agent import PPOAgent, preproces, get_relevant_info
 import jax.numpy as jnp
@@ -7,13 +8,14 @@ import jax
 import flax.serialization
 from jax.nn import sigmoid
 from utils import sample_action
+import orbax.checkpoint
 
 
 class Agent:
     def __init__(
         self,
         player: str,
-        load_parameters: bool = False,
+        load_parameters: bool = True,
         filename: str = None,
     ) -> None:
         self.player = player
@@ -24,22 +26,23 @@ class Agent:
 
         # Initialize the gameplay agent
         self.rng = jax.random.PRNGKey(2504)
-        self.ppo_agent = PPOAgent(self.opp_player)
+        self.ppo_agent = PPOAgent()
 
-        key = jax.random.PRNGKey(2504)
+        self.key = jax.random.PRNGKey(2504)
 
         sample_player_unit_positions = jax.numpy.zeros((16, 2), dtype=jnp.int32)
         sample_board_state = jnp.zeros((1, 10, 24, 24), dtype=jnp.int32)
         self.params = self.ppo_agent.init(
-            key,
+            self.key,
             sample_player_unit_positions,
             sample_board_state,
         )
 
-        # # Load parameters
-        # if load_parameters:
-        #     with open(filename, "rb") as f:
-        #         self.params = flax.serialization.from_bytes(self.params, f.read())
+        # Load parameters
+        if load_parameters:
+            checkpointer = orbax.checkpoint.PyTreeCheckpointer()
+            checkpoint_path = os.path.abspath(f"checkpoints/02132226_4")
+            self.params = checkpointer.restore(checkpoint_path)
 
     def sample_action(self, move_probs, x_probs, y_probs):
 
@@ -66,6 +69,7 @@ class Agent:
 
         step is the current timestep number of the game starting from 0 going up to max_steps_in_match * match_count_per_episode - 1.
         """
+        player = 1 if self.player == "player_1" else 0
 
         (
             unit_positions,
@@ -75,7 +79,7 @@ class Agent:
             tile_board,
             energy_board,
             num_active_units,
-        ) = get_relevant_info(obs, self.player)
+        ) = get_relevant_info(obs, player)
 
         board_state = preproces(
             unit_positions=unit_positions,
@@ -83,7 +87,7 @@ class Agent:
             relic_positions=relic_positions,
             tile_board=tile_board,
             energy_board=energy_board,
-            player=self.player,
+            player=player,
         )
 
         # Loop over all units and compute their actions
